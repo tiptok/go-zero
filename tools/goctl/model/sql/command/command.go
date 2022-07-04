@@ -77,7 +77,7 @@ func MysqlDDL(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	return fromDDL(src, dir, cfg, cache, idea, database)
+	return fromDDLGorm(src, dir, cfg, cache, idea, database)
 }
 
 // MySqlDataSource generates model code from datasource
