@@ -929,61 +929,53 @@ info(
 )
 service {{.lowerStartCamelObject}} {
     @handler {{.unTitleObject}}Get
-    post /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}GetReq) returns ({{.upperStartCamelObject}}GetResp)
+    post /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}GetRequest) returns ({{.upperStartCamelObject}}GetResponse)
     @handler {{.unTitleObject}}Save
-    post /{{.lowerStartCamelObject}} ({{.upperStartCamelObject}}SaveReq) returns ({{.upperStartCamelObject}}SaveResp)
+    post /{{.lowerStartCamelObject}} ({{.upperStartCamelObject}}SaveRequest) returns ({{.upperStartCamelObject}}SaveResponse)
     @handler {{.unTitleObject}}Delete
-    delete /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}DeleteReq) returns ({{.upperStartCamelObject}}DeleteResp)
+    delete /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}DeleteRequest) returns ({{.upperStartCamelObject}}DeleteResponse)
     @handler {{.unTitleObject}}Update
-    put /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}UpdateReq) returns ({{.upperStartCamelObject}}UpdateResp)
+    put /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}UpdateRequest) returns ({{.upperStartCamelObject}}UpdateResponse)
     @handler {{.unTitleObject}}Search
-    post /{{.lowerStartCamelObject}}/search ({{.upperStartCamelObject}}SearchReq) returns ({{.upperStartCamelObject}}SearchResp)
+    post /{{.lowerStartCamelObject}}/search ({{.upperStartCamelObject}}SearchRequest) returns ({{.upperStartCamelObject}}SearchResponse)
 }
 
 type (
-    {{.upperStartCamelObject}}GetReq {
-        Id int64
+    {{.upperStartCamelObject}}GetRequest {
+		Id int64 {{.dot}}path:"id"{{.dot}}
+	}
+    {{.upperStartCamelObject}}GetResponse struct{
+		{{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerStartCamelObject}}"{{.dot}}
     }
-    {{.upperStartCamelObject}}GetResp {
 
+	{{.upperStartCamelObject}}SaveRequest struct{
+		{{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerStartCamelObject}}"{{.dot}}
     }
+    {{.upperStartCamelObject}}SaveResponse struct{}
+
+	{{.upperStartCamelObject}}DeleteRequest struct{
+        Id int64 {{.dot}}path:"id"{{.dot}}
+    }
+    {{.upperStartCamelObject}}DeleteResponse struct{}
+
+	{{.upperStartCamelObject}}UpdateRequest struct{
+		Id int64 {{.dot}}path:"id"{{.dot}}
+        {{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerStartCamelObject}}"{{.dot}}
+    }
+    {{.upperStartCamelObject}}UpdateResponse struct{}
+
+ 	{{.upperStartCamelObject}}SearchRequest struct{
+         Page int  {{.dot}}json:"page"{{.dot}}
+         Size int  {{.dot}}json:"size"{{.dot}}
+    }
+    {{.upperStartCamelObject}}SearchResponse{
+        List []{{.upperStartCamelObject}}Item  {{.dot}}json:"list"{{.dot}}
+        Total int64 {{.dot}}json:"total"{{.dot}}
+    }
+	{{.upperStartCamelObject}}Item struct{
+	
+	}
 )
-
-type  (
-    {{.upperStartCamelObject}}SaveReq struct{
-
-    }
-    {{.upperStartCamelObject}}SaveResp struct{}
-)
-
-type(
-    {{.upperStartCamelObject}}DeleteReq struct{
-        Id int64
-    }
-    {{.upperStartCamelObject}}DeleteResp struct{}
-)
-
-type(
-    {{.upperStartCamelObject}}UpdateReq struct{
-
-    }
-    {{.upperStartCamelObject}}UpdateResp{}
-)
-
-type(
-    {{.upperStartCamelObject}}SearchReq {
-         PageNumber int64
-         PageSize int64
-    }
-    {{.upperStartCamelObject}}SearchResp{
-        List []{{.upperStartCamelObject}}Item
-        Total int64
-    }
-)
-
-type  {{.upperStartCamelObject}}Item {
-
-}
 `
 	params := map[string]interface{}{
 		//"fields":                fieldsString,
@@ -991,6 +983,7 @@ type  {{.upperStartCamelObject}}Item {
 		"lowerStartCamelObject": table.Name.Lower(),
 		"unTitleObject":         table.Name.Untitle(),
 		//"table":                 table.Name,
+		"dot": "`",
 	}
 	return &codeFile{
 		params:       params,
