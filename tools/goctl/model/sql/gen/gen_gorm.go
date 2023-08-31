@@ -438,14 +438,13 @@ func (m *{{.upperStartCamelObject}}) TableName() string {
 }
 
 func (m *{{.upperStartCamelObject}}) BeforeCreate(tx *gorm.DB) (err error) {
-	// m.CreateTime = time.Now()
-	// m.UpdateTime = time.Now()
-	// m.DeleteTime = time.Now()
+	// m.CreatedAt = time.Now().Unix()
+	// m.UpdatedAt = time.Now().Unix()
 	return
 }
 
 func (m *{{.upperStartCamelObject}}) BeforeUpdate(tx *gorm.DB) (err error) {
-	// m.UpdateTime = time.Now()
+	// m.UpdatedAt = time.Now().Unix()
 	return
 }
 
@@ -453,7 +452,7 @@ func (m *{{.upperStartCamelObject}}) CacheKeyFunc() string {
 	if m.Id == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%v:cache:%v:id:%v", "project", m.TableName(), m.Id)
+	return fmt.Sprintf("%v:cache:%v:id:%v", domain.ProjectName, m.TableName(), m.Id)
 }
 
 func (m *{{.upperStartCamelObject}}) CacheKeyFuncByObject(obj interface{}) string {
@@ -467,7 +466,7 @@ func (m *{{.upperStartCamelObject}}) CachePrimaryKeyFunc() string {
 	if len("") == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%v:cache:%v:primarykey:%v", "project", m.TableName(), "key")
+	return fmt.Sprintf("%v:cache:%v:primarykey:%v", domain.ProjectName, m.TableName(), "key")
 }
 
 `
@@ -518,7 +517,7 @@ func (repository *{{.upperStartCamelObject}}Repository) Insert(ctx context.Conte
 		return nil, tx.Error
 	}
 	dm.Id = m.Id
-	return dm, nil
+	return repository.ModelToDomainModel(m)
 
 }
 
@@ -538,7 +537,7 @@ func (repository *{{.upperStartCamelObject}}Repository) Update(ctx context.Conte
 	if _, err = repository.Query(queryFunc, m.CacheKeyFunc()); err != nil {
 		return nil, err
 	}
-	return dm, nil
+	return repository.ModelToDomainModel(m)
 }
 
 func (repository *{{.upperStartCamelObject}}Repository) UpdateWithVersion(ctx context.Context, transaction transaction.Conn, dm *domain.{{.upperStartCamelObject}}) (*domain.{{.upperStartCamelObject}}, error) {
@@ -553,13 +552,16 @@ func (repository *{{.upperStartCamelObject}}Repository) UpdateWithVersion(ctx co
 	oldVersion := dm.Version
 	m.Version += 1
 	queryFunc := func() (interface{}, error) {
-		tx = tx.Model(m).Where("id = ?", m.Id).Where("version = ?", oldVersion).Updates(m)
+		tx = tx.Model(m).Select("*").Where("id = ?", m.Id).Where("version = ?", oldVersion).Updates(m)
+		if tx.RowsAffected == 0 {
+			return nil, domain.ErrUpdateFail
+		}
 		return nil, tx.Error
 	}
 	if _, err = repository.Query(queryFunc, m.CacheKeyFunc()); err != nil {
 		return nil, err
 	}
-	return dm, nil
+	return repository.ModelToDomainModel(m)
 }
 
 func (repository *{{.upperStartCamelObject}}Repository) Delete(ctx context.Context, conn transaction.Conn, dm *domain.{{.upperStartCamelObject}}) (*domain.{{.upperStartCamelObject}}, error) {
@@ -574,7 +576,7 @@ func (repository *{{.upperStartCamelObject}}Repository) Delete(ctx context.Conte
 	if _, err := repository.Query(queryFunc, m.CacheKeyFunc()); err != nil {
 		return dm, err
 	}
-	return dm, nil
+	return repository.ModelToDomainModel(m)
 }
 
 func (repository *{{.upperStartCamelObject}}Repository) FindOne(ctx context.Context, conn transaction.Conn, id int64) (*domain.{{.upperStartCamelObject}}, error) {
@@ -762,15 +764,17 @@ func UseTrans(ctx context.Context,
 
 func PaginationAndCount(ctx context.Context, tx *gorm.DB, params map[string]interface{}, v interface{}) (int64, *gorm.DB) {
 	var total int64
-	var enableCounter bool = true
+	var enableCounter bool = false
 	if v, ok := params["enableCounter"]; ok {
 		enableCounter = v.(bool)
 	}
 	if enableCounter {
 		tx = tx.Count(&total)
-		if tx.Error != nil {
-			return total, tx
-		}
+		return total, tx
+	}
+	tx = tx.Count(&total)
+	if tx.Error != nil {
+		return total, tx
 	}
 	if v, ok := params["offset"]; ok {
 		tx.Offset(v.(int))
@@ -827,14 +831,80 @@ func (g *GormGenerator) GenDomainVar() *codeFile {
 	tmp := `
 package domain
 
-import "github.com/zeromicro/go-zero/core/stores/sqlx"
+import (
+	"errors"
+	"github.com/zeromicro/go-zero/core/stores/sqlx"
+)
 
-var ErrNotFound = sqlx.ErrNotFound
+var (
+	ErrNotFound   = sqlx.ErrNotFound
+	ErrUpdateFail = errors.New("sql: no rows affected")
+)
+
+var ProjectName = "project"
 `
 	params := map[string]interface{}{}
 	return &codeFile{
 		params:      params,
 		fileName:    fmt.Sprintf("interanl/pkg/domain/%v.go", "vars"),
+		ignoreExist: true,
+		template:    tmp,
+	}
+}
+
+func (g *GormGenerator) GenDomainRepository() *codeFile {
+	tmp := `
+package domain
+
+import "reflect"
+
+func OffsetLimit(page, size int) (offset int, limit int) {
+	if page == 0 {
+		page = 1
+	}
+	if size == 0 {
+		size = 20
+	}
+	offset = (page - 1) * size
+	limit = size
+	return
+}
+
+type QueryOptions map[string]interface{}
+
+func NewQueryOptions() QueryOptions {
+	options := make(map[string]interface{})
+	return options
+}
+func (options QueryOptions) WithOffsetLimit(page, size int) QueryOptions {
+	offset, limit := OffsetLimit(page, size)
+	options["offset"] = offset
+	options["limit"] = limit
+	return options
+}
+
+func (options QueryOptions) WithKV(key string, value interface{}) QueryOptions {
+	if reflect.ValueOf(value).IsZero() {
+		return options
+	}
+	options[key] = value
+	return options
+}
+
+func (options QueryOptions) Copy() QueryOptions {
+	newOptions := NewQueryOptions()
+	for k, v := range options {
+		newOptions[k] = v
+	}
+	return newOptions
+}
+
+type IndexQueryOptionFunc func() QueryOptions
+`
+	params := map[string]interface{}{}
+	return &codeFile{
+		params:      params,
+		fileName:    fmt.Sprintf("interanl/pkg/domain/%v.go", "repository"),
 		ignoreExist: true,
 		template:    tmp,
 	}
@@ -927,16 +997,16 @@ info(
     group: {{.lowerStartCamelObject}}
     jwt: JwtAuth
 )
-service {{.lowerStartCamelObject}} {
-    @handler {{.unTitleObject}}Get
+service Core {
+    @handler get{{.unTitleObject}}
     post /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}GetRequest) returns ({{.upperStartCamelObject}}GetResponse)
-    @handler {{.unTitleObject}}Save
+    @handler save{{.unTitleObject}}
     post /{{.lowerStartCamelObject}} ({{.upperStartCamelObject}}SaveRequest) returns ({{.upperStartCamelObject}}SaveResponse)
-    @handler {{.unTitleObject}}Delete
+    @handler delete{{.unTitleObject}}
     delete /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}DeleteRequest) returns ({{.upperStartCamelObject}}DeleteResponse)
-    @handler {{.unTitleObject}}Update
+    @handler update{{.unTitleObject}}
     put /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}UpdateRequest) returns ({{.upperStartCamelObject}}UpdateResponse)
-    @handler {{.unTitleObject}}Search
+    @handler search{{.unTitleObject}}
     post /{{.lowerStartCamelObject}}/search ({{.upperStartCamelObject}}SearchRequest) returns ({{.upperStartCamelObject}}SearchResponse)
 }
 
@@ -981,7 +1051,7 @@ type (
 		//"fields":                fieldsString,
 		"upperStartCamelObject": table.Name.ToCamel(),
 		"lowerStartCamelObject": table.Name.Lower(),
-		"unTitleObject":         table.Name.Untitle(),
+		"unTitleObject":         table.Name.ToCamel(), //table.Name.Untitle(),
 		//"table":                 table.Name,
 		"dot": "`",
 	}
