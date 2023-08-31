@@ -10,7 +10,7 @@ var (
 	// Cmd describes a model command.
 	Cmd             = cobrax.NewCommand("model")
 	mysqlCmd        = cobrax.NewCommand("mysql")
-	ddlCmd          = cobrax.NewCommand("ddl", cobrax.WithRunE(command.MysqlDDL))
+	ddlCmd          = cobrax.NewCommand("ddl", cobrax.WithRunE(command.GormDDL))
 	datasourceCmd   = cobrax.NewCommand("datasource", cobrax.WithRunE(command.MySqlDataSource))
 	pgCmd           = cobrax.NewCommand("pg", cobrax.WithRunE(command.PostgreSqlDataSource))
 	pgDatasourceCmd = cobrax.NewCommand("datasource", cobrax.WithRunE(command.PostgreSqlDataSource))

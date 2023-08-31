@@ -71,7 +71,7 @@ func (g *GormGenerator) StartFromDDL(filename string, withCache bool, database s
 func (g *GormGenerator) StartFromInformationSchema(tables map[string]*model.Table, withCache bool) error {
 	m := make(map[string]*codeTuple)
 	for _, each := range tables {
-		table, err := parser.ConvertDataType(each)
+		table, err := parser.ConvertDataType(each, false)
 		if err != nil {
 			return err
 		}
@@ -161,7 +161,7 @@ func (g *GormGenerator) createFile(modelList map[string]*codeTuple) error {
 func (g *GormGenerator) genFromDDL(filename string, withCache bool, database string) (
 	map[string]*codeTuple, error) {
 	m := make(map[string]*codeTuple)
-	tables, err := parser.Parse(filename, database)
+	tables, err := parser.Parse(filename, database, false)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +325,7 @@ func (g *GormGenerator) executeModel(table Table, code *code) (*bytes.Buffer, er
 }
 
 func (g *GormGenerator) GenFromDDL(filename string, withCache bool, database string) error {
-	tables, err := parser.Parse(filename, database)
+	tables, err := parser.Parse(filename, database, false)
 	if err != nil {
 		return err
 	}
