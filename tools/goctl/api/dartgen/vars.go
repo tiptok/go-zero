@@ -3,13 +3,23 @@ package dartgen
 import "text/template"
 
 var funcMap = template.FuncMap{
-	"getBaseName":           getBaseName,
-	"getPropertyFromMember": getPropertyFromMember,
-	"isDirectType":          isDirectType,
-	"isClassListType":       isClassListType,
-	"getCoreType":           getCoreType,
-	"pathToFuncName":        pathToFuncName,
-	"lowCamelCase":          lowCamelCase,
+	"getBaseName":                     getBaseName,
+	"getPropertyFromMember":           getPropertyFromMember,
+	"isDirectType":                    isDirectType,
+	"isAtomicType":                    isAtomicType,
+	"isNumberType":                    isNumberType,
+	"isClassListType":                 isClassListType,
+	"isAtomicListType":                isAtomicListType,
+	"isListItemsNullable":             isListItemsNullable,
+	"isNullableType":                  isNullableType,
+	"appendNullCoalescing":            appendNullCoalescing,
+	"appendDefaultEmptyValue":         appendDefaultEmptyValue,
+	"getCoreType":                     getCoreType,
+	"lowCamelCase":                    lowCamelCase,
+	"normalizeHandlerName":            normalizeHandlerName,
+	"hasUrlPathParams":                hasUrlPathParams,
+	"extractPositionalParamsFromPath": extractPositionalParamsFromPath,
+	"makeDartRequestUrlPath":          makeDartRequestUrlPath,
 }
 
 const (
@@ -53,12 +63,21 @@ Future _apiRequest(String method, String path, dynamic data,
     var client = HttpClient();
     HttpClientRequest r;
     if (method == 'POST') {
-      r = await client.postUrl(Uri.parse('https://' + serverHost + path));
+      r = await client.postUrl(Uri.parse(serverHost + path));
     } else {
-      r = await client.getUrl(Uri.parse('https://' + serverHost + path));
+      r = await client.getUrl(Uri.parse(serverHost + path));
     }
 
-    r.headers.set('Content-Type', 'application/json; charset=utf-8');
+    var strData = '';
+    if (data != null) {
+      strData = jsonEncode(data);
+    }
+
+    if (method == 'POST') {
+      r.headers.set('Content-Type', 'application/json; charset=utf-8');
+      r.headers.set('Content-Length', utf8.encode(strData).length);
+    }
+
     if (tokens != null) {
       r.headers.set('Authorization', tokens.accessToken);
     }
@@ -67,11 +86,9 @@ Future _apiRequest(String method, String path, dynamic data,
         r.headers.set(k, v);
       });
     }
-    var strData = '';
-    if (data != null) {
-      strData = jsonEncode(data);
-    }
+
     r.write(strData);
+
     var rp = await r.close();
     var body = await rp.transform(utf8.decoder).join();
     print('${rp.statusCode} - $path');
@@ -144,12 +161,19 @@ Future _apiRequest(String method, String path, dynamic data,
 			var client = HttpClient();
 			HttpClientRequest r;
 			if (method == 'POST') {
-				r = await client.postUrl(Uri.parse('https://' + serverHost + path));
+				r = await client.postUrl(Uri.parse(serverHost + path));
 			} else {
-				r = await client.getUrl(Uri.parse('https://' + serverHost + path));
+				r = await client.getUrl(Uri.parse(serverHost + path));
 			}
 
-			r.headers.set('Content-Type', 'application/json; charset=utf-8');
+      var strData = '';
+			if (data != null) {
+				strData = jsonEncode(data);
+			}
+			if (method == 'POST') {
+        r.headers.set('Content-Type', 'application/json; charset=utf-8');
+        r.headers.set('Content-Length', utf8.encode(strData).length);
+      }
 			if (tokens != null) {
 				r.headers.set('Authorization', tokens.accessToken);
 			}
@@ -158,10 +182,7 @@ Future _apiRequest(String method, String path, dynamic data,
 					r.headers.set(k, v);
 				});
 			}
-			var strData = '';
-			if (data != null) {
-				strData = jsonEncode(data);
-			}
+
 			r.write(strData);
 			var rp = await r.close();
 			var body = await rp.transform(utf8.decoder).join();

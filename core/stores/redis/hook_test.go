@@ -2,14 +2,18 @@ package redis
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log"
+	"net"
 	"strings"
 	"testing"
 	"time"
 
 	red "github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
-	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/breaker"
+	"github.com/zeromicro/go-zero/core/logx/logtest"
 	ztrace "github.com/zeromicro/go-zero/core/trace"
 	tracesdk "go.opentelemetry.io/otel/trace"
 )
@@ -21,6 +25,7 @@ func TestHookProcessCase1(t *testing.T) {
 		Batcher:  "jaeger",
 		Sampler:  1.0,
 	})
+	defer ztrace.StopAgent()
 
 	writer := log.Writer()
 	var buf strings.Builder
@@ -44,9 +49,9 @@ func TestHookProcessCase2(t *testing.T) {
 		Batcher:  "jaeger",
 		Sampler:  1.0,
 	})
+	defer ztrace.StopAgent()
 
-	w, restore := injectLog()
-	defer restore()
+	w := logtest.NewCollector(t)
 
 	ctx, err := durationHook.BeforeProcess(context.Background(), red.NewCmd(context.Background()))
 	if err != nil {
@@ -89,13 +94,16 @@ func TestHookProcessPipelineCase1(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(writer)
 
-	ctx, err := durationHook.BeforeProcessPipeline(context.Background(), []red.Cmder{red.NewCmd(context.Background())})
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, err := durationHook.BeforeProcessPipeline(context.Background(), []red.Cmder{})
+	assert.NoError(t, err)
+	ctx, err := durationHook.BeforeProcessPipeline(context.Background(), []red.Cmder{
+		red.NewCmd(context.Background()),
+	})
+	assert.NoError(t, err)
 	assert.Equal(t, "redis", tracesdk.SpanFromContext(ctx).(interface{ Name() string }).Name())
 
-	assert.Nil(t, durationHook.AfterProcessPipeline(ctx, []red.Cmder{
+	assert.NoError(t, durationHook.AfterProcessPipeline(ctx, []red.Cmder{}))
+	assert.NoError(t, durationHook.AfterProcessPipeline(ctx, []red.Cmder{
 		red.NewCmd(context.Background()),
 	}))
 	assert.False(t, strings.Contains(buf.String(), "slow"))
@@ -108,14 +116,14 @@ func TestHookProcessPipelineCase2(t *testing.T) {
 		Batcher:  "jaeger",
 		Sampler:  1.0,
 	})
+	defer ztrace.StopAgent()
 
-	w, restore := injectLog()
-	defer restore()
+	w := logtest.NewCollector(t)
 
-	ctx, err := durationHook.BeforeProcessPipeline(context.Background(), []red.Cmder{red.NewCmd(context.Background())})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ctx, err := durationHook.BeforeProcessPipeline(context.Background(), []red.Cmder{
+		red.NewCmd(context.Background()),
+	})
+	assert.NoError(t, err)
 	assert.Equal(t, "redis", tracesdk.SpanFromContext(ctx).(interface{ Name() string }).Name())
 
 	time.Sleep(slowThreshold.Load() + time.Millisecond)
@@ -129,8 +137,7 @@ func TestHookProcessPipelineCase2(t *testing.T) {
 }
 
 func TestHookProcessPipelineCase3(t *testing.T) {
-	w, restore := injectLog()
-	defer restore()
+	w := logtest.NewCollector(t)
 
 	assert.Nil(t, durationHook.AfterProcessPipeline(context.Background(), []red.Cmder{
 		red.NewCmd(context.Background()),
@@ -139,8 +146,7 @@ func TestHookProcessPipelineCase3(t *testing.T) {
 }
 
 func TestHookProcessPipelineCase4(t *testing.T) {
-	w, restore := injectLog()
-	defer restore()
+	w := logtest.NewCollector(t)
 
 	ctx := context.WithValue(context.Background(), startTimeKey, "foo")
 	assert.Nil(t, durationHook.AfterProcessPipeline(ctx, []red.Cmder{
@@ -156,18 +162,60 @@ func TestHookProcessPipelineCase5(t *testing.T) {
 	defer log.SetOutput(writer)
 
 	ctx := context.WithValue(context.Background(), startTimeKey, "foo")
-	assert.Nil(t, durationHook.AfterProcessPipeline(ctx, []red.Cmder{red.NewCmd(context.Background())}))
+	assert.Nil(t, durationHook.AfterProcessPipeline(ctx, []red.Cmder{
+		red.NewCmd(context.Background()),
+	}))
 	assert.True(t, buf.Len() == 0)
 }
 
-func injectLog() (r *strings.Builder, restore func()) {
-	var buf strings.Builder
-	w := logx.NewWriter(&buf)
-	o := logx.Reset()
-	logx.SetWriter(w)
+func TestLogDuration(t *testing.T) {
+	w := logtest.NewCollector(t)
 
-	return &buf, func() {
-		logx.Reset()
-		logx.SetWriter(o)
+	logDuration(context.Background(), []red.Cmder{
+		red.NewCmd(context.Background(), "get", "foo"),
+	}, 1*time.Second)
+	assert.True(t, strings.Contains(w.String(), "get foo"))
+
+	logDuration(context.Background(), []red.Cmder{
+		red.NewCmd(context.Background(), "get", "foo"),
+		red.NewCmd(context.Background(), "set", "bar", 0),
+	}, 1*time.Second)
+	assert.True(t, strings.Contains(w.String(), `get foo\nset bar 0`))
+}
+
+func TestFormatError(t *testing.T) {
+	// Test case: err is OpError
+	err := &net.OpError{
+		Err: mockOpError{},
 	}
+	assert.Equal(t, "timeout", formatError(err))
+
+	// Test case: err is nil
+	assert.Equal(t, "", formatError(nil))
+
+	// Test case: err is red.Nil
+	assert.Equal(t, "", formatError(red.Nil))
+
+	// Test case: err is io.EOF
+	assert.Equal(t, "eof", formatError(io.EOF))
+
+	// Test case: err is context.DeadlineExceeded
+	assert.Equal(t, "context deadline", formatError(context.DeadlineExceeded))
+
+	// Test case: err is breaker.ErrServiceUnavailable
+	assert.Equal(t, "breaker", formatError(breaker.ErrServiceUnavailable))
+
+	// Test case: err is unknown
+	assert.Equal(t, "unexpected error", formatError(errors.New("some error")))
+}
+
+type mockOpError struct {
+}
+
+func (mockOpError) Error() string {
+	return "mock error"
+}
+
+func (mockOpError) Timeout() bool {
+	return true
 }

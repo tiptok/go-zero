@@ -1,5 +1,4 @@
 //go:build linux || darwin
-// +build linux darwin
 
 package proc
 
@@ -27,7 +26,7 @@ func init() {
 			v := <-signals
 			switch v {
 			case syscall.SIGUSR1:
-				dumpGoroutines()
+				dumpGoroutines(fileCreator{})
 			case syscall.SIGUSR2:
 				if profiler == nil {
 					profiler = StartProfile()

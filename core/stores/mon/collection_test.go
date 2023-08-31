@@ -3,12 +3,11 @@ package mon
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zeromicro/go-zero/core/breaker"
-	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/logx/logtest"
 	"github.com/zeromicro/go-zero/core/stringx"
 	"github.com/zeromicro/go-zero/core/timex"
 	"go.mongodb.org/mongo-driver/bson"
@@ -19,10 +18,6 @@ import (
 )
 
 var errDummy = errors.New("dummy")
-
-func init() {
-	logx.Disable()
-}
 
 func TestKeepPromise_accept(t *testing.T) {
 	p := new(mockPromise)
@@ -110,14 +105,14 @@ func TestCollection_BulkWrite(t *testing.T) {
 		}
 		mt.AddMockResponses(mtest.CreateSuccessResponse(bson.D{{Key: "ok", Value: 1}}...))
 		res, err := c.BulkWrite(context.Background(), []mongo.WriteModel{
-			mongo.NewInsertOneModel().SetDocument(bson.D{{Key: "foo", Value: 1}})},
-		)
+			mongo.NewInsertOneModel().SetDocument(bson.D{{Key: "foo", Value: 1}}),
+		})
 		assert.Nil(t, err)
 		assert.NotNil(t, res)
 		c.brk = new(dropBreaker)
 		_, err = c.BulkWrite(context.Background(), []mongo.WriteModel{
-			mongo.NewInsertOneModel().SetDocument(bson.D{{Key: "foo", Value: 1}})},
-		)
+			mongo.NewInsertOneModel().SetDocument(bson.D{{Key: "foo", Value: 1}}),
+		})
 		assert.Equal(t, errDummy, err)
 	})
 }
@@ -208,7 +203,7 @@ func TestCollection_EstimatedDocumentCount(t *testing.T) {
 	})
 }
 
-func TestCollectionFind(t *testing.T) {
+func TestCollection_Find(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 	defer mt.Close()
 
@@ -256,7 +251,7 @@ func TestCollectionFind(t *testing.T) {
 	})
 }
 
-func TestCollectionFindOne(t *testing.T) {
+func TestCollection_FindOne(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 	defer mt.Close()
 
@@ -426,7 +421,7 @@ func TestCollection_InsertMany(t *testing.T) {
 			brk:        breaker.NewBreaker(),
 		}
 		mt.AddMockResponses(mtest.CreateSuccessResponse(bson.D{{Key: "ok", Value: 1}}...))
-		res, err := c.InsertMany(context.Background(), []interface{}{
+		res, err := c.InsertMany(context.Background(), []any{
 			bson.D{{Key: "foo", Value: "bar"}},
 			bson.D{{Key: "foo", Value: "baz"}},
 		})
@@ -435,12 +430,12 @@ func TestCollection_InsertMany(t *testing.T) {
 		assert.Equal(t, 2, len(res.InsertedIDs))
 
 		c.brk = new(dropBreaker)
-		_, err = c.InsertMany(context.Background(), []interface{}{bson.D{{Key: "foo", Value: "bar"}}})
+		_, err = c.InsertMany(context.Background(), []any{bson.D{{Key: "foo", Value: "bar"}}})
 		assert.Equal(t, errDummy, err)
 	})
 }
 
-func TestCollection_Remove(t *testing.T) {
+func TestCollection_DeleteOne(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 	defer mt.Close()
 
@@ -460,7 +455,7 @@ func TestCollection_Remove(t *testing.T) {
 	})
 }
 
-func TestCollectionRemoveAll(t *testing.T) {
+func TestCollection_DeleteMany(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 	defer mt.Close()
 
@@ -569,7 +564,7 @@ func TestCollection_UpdateMany(t *testing.T) {
 	})
 }
 
-func Test_DecoratedCollectionLogDuration(t *testing.T) {
+func TestDecoratedCollection_LogDuration(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 	defer mt.Close()
 	c := decoratedCollection{
@@ -577,15 +572,7 @@ func Test_DecoratedCollectionLogDuration(t *testing.T) {
 		brk:        breaker.NewBreaker(),
 	}
 
-	var buf strings.Builder
-	w := logx.NewWriter(&buf)
-	o := logx.Reset()
-	logx.SetWriter(w)
-
-	defer func() {
-		logx.Reset()
-		logx.SetWriter(o)
-	}()
+	buf := logtest.NewCollector(t)
 
 	buf.Reset()
 	c.logDuration(context.Background(), "foo", timex.Now(), nil, "bar")

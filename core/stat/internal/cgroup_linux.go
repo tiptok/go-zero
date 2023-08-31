@@ -3,6 +3,7 @@ package internal
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -218,6 +219,7 @@ func parseUints(val string) ([]uint64, error) {
 		return nil, nil
 	}
 
+	var sets []uint64
 	ints := make(map[uint64]lang.PlaceholderType)
 	cols := strings.Split(val, ",")
 	for _, r := range cols {
@@ -238,7 +240,10 @@ func parseUints(val string) ([]uint64, error) {
 			}
 
 			for i := min; i <= max; i++ {
-				ints[i] = lang.Placeholder
+				if _, ok := ints[i]; !ok {
+					ints[i] = lang.Placeholder
+					sets = append(sets, i)
+				}
 			}
 		} else {
 			v, err := parseUint(r)
@@ -246,13 +251,11 @@ func parseUints(val string) ([]uint64, error) {
 				return nil, err
 			}
 
-			ints[v] = lang.Placeholder
+			if _, ok := ints[v]; !ok {
+				ints[v] = lang.Placeholder
+				sets = append(sets, v)
+			}
 		}
-	}
-
-	var sets []uint64
-	for k := range ints {
-		sets = append(sets, k)
 	}
 
 	return sets, nil
@@ -278,13 +281,12 @@ func runningInUserNS() bool {
 		var a, b, c int64
 		fmt.Sscanf(line, "%d %d %d", &a, &b, &c)
 
-		/*
-		 * We assume we are in the initial user namespace if we have a full
-		 * range - 4294967295 uids starting at uid 0.
-		 */
-		if a == 0 && b == 0 && c == 4294967295 {
+		// We assume we are in the initial user namespace if we have a full
+		// range - 4294967295 uids starting at uid 0.
+		if a == 0 && b == 0 && c == math.MaxUint32 {
 			return
 		}
+
 		inUserNS = true
 	})
 

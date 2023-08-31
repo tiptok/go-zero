@@ -4,9 +4,9 @@ import "sync"
 
 // A Ring can be used as fixed size ring.
 type Ring struct {
-	elements []interface{}
+	elements []any
 	index    int
-	lock     sync.Mutex
+	lock     sync.RWMutex
 }
 
 // NewRing returns a Ring object with the given size n.
@@ -16,12 +16,12 @@ func NewRing(n int) *Ring {
 	}
 
 	return &Ring{
-		elements: make([]interface{}, n),
+		elements: make([]any, n),
 	}
 }
 
 // Add adds v into r.
-func (r *Ring) Add(v interface{}) {
+func (r *Ring) Add(v any) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -30,9 +30,9 @@ func (r *Ring) Add(v interface{}) {
 }
 
 // Take takes all items from r.
-func (r *Ring) Take() []interface{} {
-	r.lock.Lock()
-	defer r.lock.Unlock()
+func (r *Ring) Take() []any {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
 
 	var size int
 	var start int
@@ -43,7 +43,7 @@ func (r *Ring) Take() []interface{} {
 		size = r.index
 	}
 
-	elements := make([]interface{}, size)
+	elements := make([]any, size)
 	for i := 0; i < size; i++ {
 		elements[i] = r.elements[(start+i)%len(r.elements)]
 	}

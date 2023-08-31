@@ -5,6 +5,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/zeromicro/go-zero/core/proc"
 )
 
 func TestNewGaugeVec(t *testing.T) {
@@ -18,9 +19,12 @@ func TestNewGaugeVec(t *testing.T) {
 	gaugeVecNil := NewGaugeVec(nil)
 	assert.NotNil(t, gaugeVec)
 	assert.Nil(t, gaugeVecNil)
+
+	proc.Shutdown()
 }
 
 func TestGaugeInc(t *testing.T) {
+	startAgent()
 	gaugeVec := NewGaugeVec(&GaugeVecOpts{
 		Namespace: "rpc_client2",
 		Subsystem: "requests",
@@ -37,6 +41,7 @@ func TestGaugeInc(t *testing.T) {
 }
 
 func TestGaugeAdd(t *testing.T) {
+	startAgent()
 	gaugeVec := NewGaugeVec(&GaugeVecOpts{
 		Namespace: "rpc_client",
 		Subsystem: "request",
@@ -53,6 +58,7 @@ func TestGaugeAdd(t *testing.T) {
 }
 
 func TestGaugeSet(t *testing.T) {
+	startAgent()
 	gaugeVec := NewGaugeVec(&GaugeVecOpts{
 		Namespace: "http_client",
 		Subsystem: "request",

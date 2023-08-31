@@ -9,16 +9,16 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
-	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/internal/dbtest"
 )
 
 type mockedConn struct {
 	query   string
-	args    []interface{}
+	args    []any
 	execErr error
 }
 
-func (c *mockedConn) ExecCtx(_ context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (c *mockedConn) ExecCtx(_ context.Context, query string, args ...any) (sql.Result, error) {
 	c.query = query
 	c.args = args
 	return nil, c.execErr
@@ -28,19 +28,19 @@ func (c *mockedConn) PrepareCtx(ctx context.Context, query string) (StmtSession,
 	panic("implement me")
 }
 
-func (c *mockedConn) QueryRowCtx(ctx context.Context, v interface{}, query string, args ...interface{}) error {
+func (c *mockedConn) QueryRowCtx(ctx context.Context, v any, query string, args ...any) error {
 	panic("implement me")
 }
 
-func (c *mockedConn) QueryRowPartialCtx(ctx context.Context, v interface{}, query string, args ...interface{}) error {
+func (c *mockedConn) QueryRowPartialCtx(ctx context.Context, v any, query string, args ...any) error {
 	panic("implement me")
 }
 
-func (c *mockedConn) QueryRowsCtx(ctx context.Context, v interface{}, query string, args ...interface{}) error {
+func (c *mockedConn) QueryRowsCtx(ctx context.Context, v any, query string, args ...any) error {
 	panic("implement me")
 }
 
-func (c *mockedConn) QueryRowsPartialCtx(ctx context.Context, v interface{}, query string, args ...interface{}) error {
+func (c *mockedConn) QueryRowsPartialCtx(ctx context.Context, v any, query string, args ...any) error {
 	panic("implement me")
 }
 
@@ -48,7 +48,7 @@ func (c *mockedConn) TransactCtx(ctx context.Context, fn func(context.Context, S
 	panic("should not called")
 }
 
-func (c *mockedConn) Exec(query string, args ...interface{}) (sql.Result, error) {
+func (c *mockedConn) Exec(query string, args ...any) (sql.Result, error) {
 	return c.ExecCtx(context.Background(), query, args...)
 }
 
@@ -56,19 +56,19 @@ func (c *mockedConn) Prepare(query string) (StmtSession, error) {
 	panic("should not called")
 }
 
-func (c *mockedConn) QueryRow(v interface{}, query string, args ...interface{}) error {
+func (c *mockedConn) QueryRow(v any, query string, args ...any) error {
 	panic("should not called")
 }
 
-func (c *mockedConn) QueryRowPartial(v interface{}, query string, args ...interface{}) error {
+func (c *mockedConn) QueryRowPartial(v any, query string, args ...any) error {
 	panic("should not called")
 }
 
-func (c *mockedConn) QueryRows(v interface{}, query string, args ...interface{}) error {
+func (c *mockedConn) QueryRows(v any, query string, args ...any) error {
 	panic("should not called")
 }
 
-func (c *mockedConn) QueryRowsPartial(v interface{}, query string, args ...interface{}) error {
+func (c *mockedConn) QueryRowsPartial(v any, query string, args ...any) error {
 	panic("should not called")
 }
 
@@ -81,7 +81,7 @@ func (c *mockedConn) Transact(func(session Session) error) error {
 }
 
 func TestBulkInserter(t *testing.T) {
-	runSqlTest(t, func(db *sql.DB, mock sqlmock.Sqlmock) {
+	dbtest.RunTest(t, func(db *sql.DB, mock sqlmock.Sqlmock) {
 		var conn mockedConn
 		inserter, err := NewBulkInserter(&conn, `INSERT INTO classroom_dau(classroom, user, count) VALUES(?, ?, ?)`)
 		assert.Nil(t, err)
@@ -98,7 +98,7 @@ func TestBulkInserter(t *testing.T) {
 }
 
 func TestBulkInserterSuffix(t *testing.T) {
-	runSqlTest(t, func(db *sql.DB, mock sqlmock.Sqlmock) {
+	dbtest.RunTest(t, func(db *sql.DB, mock sqlmock.Sqlmock) {
 		var conn mockedConn
 		inserter, err := NewBulkInserter(&conn, `INSERT INTO classroom_dau(classroom, user, count) VALUES`+
 			`(?, ?, ?) ON DUPLICATE KEY UPDATE is_overtime=VALUES(is_overtime)`)
@@ -119,7 +119,7 @@ func TestBulkInserterSuffix(t *testing.T) {
 }
 
 func TestBulkInserterBadStatement(t *testing.T) {
-	runSqlTest(t, func(db *sql.DB, mock sqlmock.Sqlmock) {
+	dbtest.RunTest(t, func(db *sql.DB, mock sqlmock.Sqlmock) {
 		var conn mockedConn
 		_, err := NewBulkInserter(&conn, "foo")
 		assert.NotNil(t, err)
@@ -143,20 +143,4 @@ func TestBulkInserter_Update(t *testing.T) {
 	inserter.inserter.Execute([]string(nil))
 	assert.NotNil(t, inserter.UpdateStmt("foo"))
 	assert.NotNil(t, inserter.Insert("foo", "bar"))
-}
-
-func runSqlTest(t *testing.T, fn func(db *sql.DB, mock sqlmock.Sqlmock)) {
-	logx.Disable()
-
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
-	}
-	defer db.Close()
-
-	fn(db, mock)
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("there were unfulfilled expectations: %s", err)
-	}
 }

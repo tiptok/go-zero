@@ -81,6 +81,7 @@ from (
            and a.attnum > 0
            and a.attrelid = c.oid
            and a.atttypid = t.oid
+ 		 GROUP BY a.attnum, c.relname, a.attname, t.typname, a.atttypmod, a.attnotnull, b.description
          ORDER BY a.attnum) AS t
          left join information_schema.columns AS c on t.relname = c.table_name 
 		and t.field = c.column_name and c.table_schema = $2`
@@ -111,7 +112,7 @@ func (m *PostgreSqlModel) getColumns(schema, table string, in []*PostgreColumn) 
 
 	var list []*Column
 	for _, e := range in {
-		var dft interface{}
+		var dft any
 		if len(e.ColumnDefault.String) > 0 {
 			dft = e.ColumnDefault
 		}

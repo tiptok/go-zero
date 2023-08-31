@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"text/template"
 
-	"github.com/logrusorgru/aurora"
+	"github.com/gookit/color"
 	"github.com/spf13/cobra"
 	"github.com/zeromicro/go-zero/tools/goctl/util"
 	"github.com/zeromicro/go-zero/tools/goctl/util/pathx"
@@ -29,25 +29,27 @@ var (
 
 // Deployment describes the k8s deployment yaml
 type Deployment struct {
-	Name           string
-	Namespace      string
-	Image          string
-	Secret         string
-	Replicas       int
-	Revisions      int
-	Port           int
-	NodePort       int
-	UseNodePort    bool
-	RequestCpu     int
-	RequestMem     int
-	LimitCpu       int
-	LimitMem       int
-	MinReplicas    int
-	MaxReplicas    int
-	ServiceAccount string
+	Name            string
+	Namespace       string
+	Image           string
+	Secret          string
+	Replicas        int
+	Revisions       int
+	Port            int
+	TargetPort      int
+	NodePort        int
+	UseNodePort     bool
+	RequestCpu      int
+	RequestMem      int
+	LimitCpu        int
+	LimitMem        int
+	MinReplicas     int
+	MaxReplicas     int
+	ServiceAccount  string
+	ImagePullPolicy string
 }
 
-// DeploymentCommand is used to generate the kubernetes deployment yaml files.
+// deploymentCommand is used to generate the kubernetes deployment yaml files.
 func deploymentCommand(_ *cobra.Command, _ []string) error {
 	nodePort := varIntNodePort
 	home := varStringHome
@@ -80,30 +82,36 @@ func deploymentCommand(_ *cobra.Command, _ []string) error {
 	}
 	defer out.Close()
 
+	if varIntTargetPort == 0 {
+		varIntTargetPort = varIntPort
+	}
+
 	t := template.Must(template.New("deploymentTemplate").Parse(text))
 	err = t.Execute(out, Deployment{
-		Name:           varStringName,
-		Namespace:      varStringNamespace,
-		Image:          varStringImage,
-		Secret:         varStringSecret,
-		Replicas:       varIntReplicas,
-		Revisions:      varIntRevisions,
-		Port:           varIntPort,
-		NodePort:       nodePort,
-		UseNodePort:    nodePort > 0,
-		RequestCpu:     varIntRequestCpu,
-		RequestMem:     varIntRequestMem,
-		LimitCpu:       varIntLimitCpu,
-		LimitMem:       varIntLimitMem,
-		MinReplicas:    varIntMinReplicas,
-		MaxReplicas:    varIntMaxReplicas,
-		ServiceAccount: varStringServiceAccount,
+		Name:            varStringName,
+		Namespace:       varStringNamespace,
+		Image:           varStringImage,
+		Secret:          varStringSecret,
+		Replicas:        varIntReplicas,
+		Revisions:       varIntRevisions,
+		Port:            varIntPort,
+		TargetPort:      varIntTargetPort,
+		NodePort:        nodePort,
+		UseNodePort:     nodePort > 0,
+		RequestCpu:      varIntRequestCpu,
+		RequestMem:      varIntRequestMem,
+		LimitCpu:        varIntLimitCpu,
+		LimitMem:        varIntLimitMem,
+		MinReplicas:     varIntMinReplicas,
+		MaxReplicas:     varIntMaxReplicas,
+		ServiceAccount:  varStringServiceAccount,
+		ImagePullPolicy: varStringImagePullPolicy,
 	})
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(aurora.Green("Done."))
+	fmt.Println(color.Green.Render("Done."))
 	return nil
 }
 

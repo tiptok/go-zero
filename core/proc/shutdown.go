@@ -1,5 +1,4 @@
 //go:build linux || darwin
-// +build linux darwin
 
 package proc
 
@@ -41,6 +40,16 @@ func AddWrapUpListener(fn func()) (waitForCalled func()) {
 // SetTimeToForceQuit sets the waiting time before force quitting.
 func SetTimeToForceQuit(duration time.Duration) {
 	delayTimeBeforeForceQuit = duration
+}
+
+// Shutdown calls the registered shutdown listeners, only for test purpose.
+func Shutdown() {
+	shutdownListeners.notifyListeners()
+}
+
+// WrapUp wraps up the process, only for test purpose.
+func WrapUp() {
+	wrapUpListeners.notifyListeners()
 }
 
 func gracefulStop(signals chan os.Signal) {
@@ -87,4 +96,6 @@ func (lm *listenerManager) notifyListeners() {
 		group.RunSafe(listener)
 	}
 	group.Wait()
+
+	lm.listeners = nil
 }

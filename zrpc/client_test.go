@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zeromicro/go-zero/core/discov"
 	"github.com/zeromicro/go-zero/core/logx"
-	"github.com/zeromicro/go-zero/zrpc/internal/mock"
+	"github.com/zeromicro/go-zero/internal/mock"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -76,9 +76,16 @@ func TestDepositServer_Deposit(t *testing.T) {
 			App:       "foo",
 			Token:     "bar",
 			Timeout:   1000,
+			Middlewares: ClientMiddlewaresConf{
+				Trace:      true,
+				Duration:   true,
+				Prometheus: true,
+				Breaker:    true,
+				Timeout:    true,
+			},
 		},
 		WithDialOption(grpc.WithContextDialer(dialer())),
-		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply interface{},
+		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply any,
 			cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}),
@@ -90,23 +97,38 @@ func TestDepositServer_Deposit(t *testing.T) {
 			Token:     "bar",
 			Timeout:   1000,
 			NonBlock:  true,
+			Middlewares: ClientMiddlewaresConf{
+				Trace:      true,
+				Duration:   true,
+				Prometheus: true,
+				Breaker:    true,
+				Timeout:    true,
+			},
 		},
 		WithDialOption(grpc.WithContextDialer(dialer())),
-		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply interface{},
+		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply any,
 			cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}),
 	)
 	tarConfClient := MustNewClient(
 		RpcClientConf{
-			Target:  "foo",
-			App:     "foo",
-			Token:   "bar",
-			Timeout: 1000,
+			Target:        "foo",
+			App:           "foo",
+			Token:         "bar",
+			Timeout:       1000,
+			KeepaliveTime: time.Second * 15,
+			Middlewares: ClientMiddlewaresConf{
+				Trace:      true,
+				Duration:   true,
+				Prometheus: true,
+				Breaker:    true,
+				Timeout:    true,
+			},
 		},
 		WithDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 		WithDialOption(grpc.WithContextDialer(dialer())),
-		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply interface{},
+		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply any,
 			cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}),
@@ -114,7 +136,7 @@ func TestDepositServer_Deposit(t *testing.T) {
 	targetClient, err := NewClientWithTarget("foo",
 		WithDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 		WithDialOption(grpc.WithContextDialer(dialer())), WithUnaryClientInterceptor(
-			func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn,
+			func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn,
 				invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 				return invoker(ctx, method, req, reply, cc, opts...)
 			}), WithTimeout(1000*time.Millisecond))
@@ -125,6 +147,7 @@ func TestDepositServer_Deposit(t *testing.T) {
 		tarConfClient,
 		targetClient,
 	}
+	DontLogClientContentForMethod("foo")
 	SetClientSlowThreshold(time.Second)
 
 	for _, tt := range tests {
@@ -166,7 +189,7 @@ func TestNewClientWithError(t *testing.T) {
 		},
 		WithDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 		WithDialOption(grpc.WithContextDialer(dialer())),
-		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply interface{},
+		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply any,
 			cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}),
@@ -185,10 +208,22 @@ func TestNewClientWithError(t *testing.T) {
 		},
 		WithDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 		WithDialOption(grpc.WithContextDialer(dialer())),
-		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply interface{},
+		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply any,
 			cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}),
 	)
+	assert.NotNil(t, err)
+}
+
+func TestNewClientWithTarget(t *testing.T) {
+	_, err := NewClientWithTarget("",
+		WithDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+		WithDialOption(grpc.WithContextDialer(dialer())),
+		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply any,
+			cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}))
+
 	assert.NotNil(t, err)
 }
