@@ -354,6 +354,8 @@ func (g *GormGenerator) GenFromDDL(filename string, withCache bool, database str
 	codeFiles = append(codeFiles, g.GenMigrate())
 	// domain var
 	codeFiles = append(codeFiles, g.GenDomainVar())
+	// domain repository
+	codeFiles = append(codeFiles, g.GenDomainRepository())
 
 	for _, codeFileItem := range codeFiles {
 		if codeFileItem == nil {
@@ -762,16 +764,27 @@ func UseTrans(ctx context.Context,
 	return fn(ctx, tx)
 }
 
-func PaginationAndCount(ctx context.Context, tx *gorm.DB, params map[string]interface{}, v interface{}) (int64, *gorm.DB) {
+func PaginationAndCount(ctx context.Context, tx *gorm.DB, params map[string]interface{}, dst interface{}) (int64, *gorm.DB) {
 	var total int64
-	var enableCounter bool = false
-	if v, ok := params["enableCounter"]; ok {
-		enableCounter = v.(bool)
-	}
-	if enableCounter {
+	// 只返回数量
+	if v, ok := params["countOnly"]; ok && v.(bool) {
 		tx = tx.Count(&total)
 		return total, tx
 	}
+	// 只返回记录
+	if v, ok := params["findOnly"]; ok && v.(bool) {
+		if v, ok := params["offset"]; ok {
+			tx.Offset(v.(int))
+		}
+		if v, ok := params["limit"]; ok {
+			tx.Limit(v.(int))
+		}
+		if tx = tx.Find(dst); tx.Error != nil {
+			return 0, tx
+		}
+		return total, tx
+	}
+	// 数量跟记录都返回
 	tx = tx.Count(&total)
 	if tx.Error != nil {
 		return total, tx
@@ -782,7 +795,7 @@ func PaginationAndCount(ctx context.Context, tx *gorm.DB, params map[string]inte
 	if v, ok := params["limit"]; ok {
 		tx.Limit(v.(int))
 	}
-	if tx = tx.Find(v); tx.Error != nil {
+	if tx = tx.Find(dst); tx.Error != nil {
 		return 0, tx
 	}
 	return total, tx
@@ -856,7 +869,10 @@ func (g *GormGenerator) GenDomainRepository() *codeFile {
 	tmp := `
 package domain
 
-import "reflect"
+import (
+	"context"
+	"reflect"
+)
 
 func OffsetLimit(page, size int) (offset int, limit int) {
 	if page == 0 {
@@ -891,6 +907,11 @@ func (options QueryOptions) WithKV(key string, value interface{}) QueryOptions {
 	return options
 }
 
+func (options QueryOptions) MustWithKV(key string, value interface{}) QueryOptions {
+	options[key] = value
+	return options
+}
+
 func (options QueryOptions) Copy() QueryOptions {
 	newOptions := NewQueryOptions()
 	for k, v := range options {
@@ -900,6 +921,38 @@ func (options QueryOptions) Copy() QueryOptions {
 }
 
 type IndexQueryOptionFunc func() QueryOptions
+
+// 自定义的一些查询条件
+
+func (options QueryOptions) WithCountOnly() QueryOptions {
+	options["countOnly"] = true
+	return options
+}
+func (options QueryOptions) WithFindOnly() QueryOptions {
+	options["findOnly"] = true
+	return options
+}
+
+func LazyLoad[K comparable, T any](source map[K]T, ctx context.Context, conn transaction.Conn, k K, load func(context.Context, transaction.Conn, K) (T, error)) (T, error) {
+	if v, ok := source[k]; ok {
+		return v, nil
+	}
+	if v, err := load(ctx, conn, k); err != nil {
+		return v, err
+	} else {
+		source[k] = v
+		return v, nil
+	}
+}
+
+func Values[T any, V any](list []T, each func(item T) V) []V {
+	var result []V
+	for _, item := range list {
+		value := each(item)
+		result = append(result, value)
+	}
+	return result
+}
 `
 	params := map[string]interface{}{}
 	return &codeFile{
@@ -922,7 +975,7 @@ message {{.upperStartCamelObject}}GetReq {
    int64 Id = 1;
 }
 message {{.upperStartCamelObject}}GetResp{
-    {{.upperStartCamelObject}}Item User = 1;
+    {{.upperStartCamelObject}}Item {{.upperStartCamelObject}} = 1;
 }
 
 message {{.upperStartCamelObject}}SaveReq {
@@ -993,20 +1046,25 @@ info(
 )
 
 @server(
-    prefix: {{.lowerStartCamelObject}}/v1
+    prefix: v1
     group: {{.lowerStartCamelObject}}
     jwt: JwtAuth
 )
 service Core {
-    @handler get{{.unTitleObject}}
-    post /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}GetRequest) returns ({{.upperStartCamelObject}}GetResponse)
-    @handler save{{.unTitleObject}}
+	@doc  "详情"
+    @handler {{.lowerFirstCamelObject}}Get
+    get /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}GetRequest) returns ({{.upperStartCamelObject}}GetResponse)
+    @doc  "保存"
+	@handler {{.lowerFirstCamelObject}}Save
     post /{{.lowerStartCamelObject}} ({{.upperStartCamelObject}}SaveRequest) returns ({{.upperStartCamelObject}}SaveResponse)
-    @handler delete{{.unTitleObject}}
+    @doc  "删除"
+	@handler {{.lowerFirstCamelObject}}Delete
     delete /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}DeleteRequest) returns ({{.upperStartCamelObject}}DeleteResponse)
-    @handler update{{.unTitleObject}}
+    @doc  "更新"
+	@handler {{.lowerFirstCamelObject}}Update
     put /{{.lowerStartCamelObject}}/:id ({{.upperStartCamelObject}}UpdateRequest) returns ({{.upperStartCamelObject}}UpdateResponse)
-    @handler search{{.unTitleObject}}
+    @doc  "搜索"
+	@handler {{.lowerFirstCamelObject}}Search
     post /{{.lowerStartCamelObject}}/search ({{.upperStartCamelObject}}SearchRequest) returns ({{.upperStartCamelObject}}SearchResponse)
 }
 
@@ -1015,11 +1073,11 @@ type (
 		Id int64 {{.dot}}path:"id"{{.dot}}
 	}
     {{.upperStartCamelObject}}GetResponse struct{
-		{{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerStartCamelObject}}"{{.dot}}
+		{{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerFirstCamelObject}}"{{.dot}}
     }
 
 	{{.upperStartCamelObject}}SaveRequest struct{
-		{{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerStartCamelObject}}"{{.dot}}
+		{{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerFirstCamelObject}}"{{.dot}}
     }
     {{.upperStartCamelObject}}SaveResponse struct{}
 
@@ -1030,7 +1088,7 @@ type (
 
 	{{.upperStartCamelObject}}UpdateRequest struct{
 		Id int64 {{.dot}}path:"id"{{.dot}}
-        {{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerStartCamelObject}}"{{.dot}}
+        {{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerFirstCamelObject}}"{{.dot}}
     }
     {{.upperStartCamelObject}}UpdateResponse struct{}
 
@@ -1046,14 +1104,119 @@ type (
 	
 	}
 )
+
+// logic CRUD
+// Save
+	//var (
+	//	conn = l.svcCtx.DefaultDBConn()
+	//	dm   *domain.{{.upperStartCamelObject}}
+	//)
+	//// 唯一判断
+
+	//dm = NewDomain{{.upperStartCamelObject}}(req.{{.upperStartCamelObject}})
+	//if err = transaction.UseTrans(l.ctx, l.svcCtx.DB, func(ctx context.Context, conn transaction.Conn) error {
+	//	dm, err = l.svcCtx.{{.upperStartCamelObject}}Repository.Insert(l.ctx, conn, dm)
+	//	return err
+	//}, true); err != nil {
+	//	return nil, xerr.NewErrMsg("保存失败")
+	//}
+	////resp = &types.{{.upperStartCamelObject}}SaveResponse{}
+	//return
+
+//func NewDomain{{.upperStartCamelObject}}(item types.{{.upperStartCamelObject}}Item) *domain.{{.upperStartCamelObject}} {
+//	return &domain.{{.upperStartCamelObject}}{
+
+//	}
+//}
+//
+//func NewTypes{{.upperStartCamelObject}}(item *domain.{{.upperStartCamelObject}}) types.{{.upperStartCamelObject}}Item {
+//	return types.{{.upperStartCamelObject}}Item{
+//		Id:     item.Id,
+//	}
+//}
+
+// Get
+	//var (
+	//	conn = l.svcCtx.DefaultDBConn()
+	//	dm   *domain.{{.upperStartCamelObject}}
+	//)
+	//// 货号唯一
+	//if dm, err = l.svcCtx.{{.upperStartCamelObject}}Repository.FindOne(l.ctx, conn, req.Id); err != nil {
+	//	return nil, xerr.NewErrMsgErr("不存在", err)
+	//}
+	//resp = &types.{{.upperStartCamelObject}}GetResponse{
+	//	{{.upperStartCamelObject}}: NewTypes{{.upperStartCamelObject}}(dm),
+	//}
+	//return
+
+// Delete
+	//var (
+	//	conn = l.svcCtx.DefaultDBConn()
+	//	dm   *domain.{{.upperStartCamelObject}}
+	//)
+	//if dm, err = l.svcCtx.{{.upperStartCamelObject}}Repository.FindOne(l.ctx, conn, req.Id); err != nil {
+	//	return nil, xerr.NewErrMsgErr("不存在", err)
+	//}
+	//if err = transaction.UseTrans(l.ctx, l.svcCtx.DB, func(ctx context.Context, conn transaction.Conn) error {
+	//	if dm, err = l.svcCtx.{{.upperStartCamelObject}}Repository.Delete(l.ctx, conn, dm); err != nil {
+	//		return err
+	//	}
+	//	return nil
+	//}, true); err != nil {
+	//	return nil, xerr.NewErrMsgErr("移除失败", err)
+	//}
+	//return
+
+// Search
+	//var (
+	//	conn  = l.svcCtx.DefaultDBConn()
+	//	dms   []*domain.{{.upperStartCamelObject}}
+	//	total int64
+	//)
+	//
+	//queryOptions := domain.NewQueryOptions().WithOffsetLimit(req.Page, req.Size).
+	//	WithKV("", "")
+
+	//total, dms, err = l.svcCtx.{{.upperStartCamelObject}}Repository.Find(l.ctx, conn, queryOptions)
+	//list := make([]types.{{.upperStartCamelObject}}Item, 0)
+	//for i := range dms {
+	//	list = append(list, NewTypes{{.upperStartCamelObject}}(dms[i]))
+	//}
+	//resp = &types.{{.upperStartCamelObject}}SearchResponse{
+	//	List:  list,
+	//	Total: total,
+	//}
+	//return
+
+// Update
+	//var (
+	//	conn = l.svcCtx.DefaultDBConn()
+	//	dm   *domain.{{.upperStartCamelObject}}
+	//)
+	//if dm, err = l.svcCtx.{{.upperStartCamelObject}}Repository.FindOne(l.ctx, conn, req.Id); err != nil {
+	//	return nil, xerr.NewErrMsgErr("不存在", err)
+	//}
+	//// 不可编辑判断
+	
+	//// 赋值
+
+	//// 更新
+	//if err = transaction.UseTrans(l.ctx, l.svcCtx.DB, func(ctx context.Context, conn transaction.Conn) error {
+	//	dm, err = l.svcCtx.{{.upperStartCamelObject}}Repository.UpdateWithVersion(l.ctx, conn, dm)
+	//	return err
+	//}, true); err != nil {
+	//	return nil, xerr.NewErrMsg("更新失败")
+	//}
+	//resp = &types.{{.upperStartCamelObject}}UpdateResponse{}
+	//return
 `
 	params := map[string]interface{}{
 		//"fields":                fieldsString,
 		"upperStartCamelObject": table.Name.ToCamel(),
 		"lowerStartCamelObject": table.Name.Lower(),
 		"unTitleObject":         table.Name.ToCamel(), //table.Name.Untitle(),
-		//"table":                 table.Name,
-		"dot": "`",
+		"lowerFirstCamelObject": table.Name.ToCamelWithLowerFirst(),
+		"dot":                   "`",
 	}
 	return &codeFile{
 		params:       params,

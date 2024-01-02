@@ -82,6 +82,20 @@ func (s String) ToSnake() string {
 	return strings.Join(target, "_")
 }
 
+// ToCamelWithLowerFirst converts the input text into camel case
+func (s String) ToCamelWithLowerFirst() string {
+	list := s.splitBy(unicode.IsUpper, false)
+	var target []string
+	for index, item := range list {
+		if index == 0 {
+			target = append(target, From(item).Lower())
+		} else {
+			target = append(target, From(item).Source())
+		}
+	}
+	return strings.Join(target, "")
+}
+
 // Untitle return the original string if rune is not letter at index 0
 func (s String) Untitle() string {
 	if s.IsEmptyOrSpace() {
