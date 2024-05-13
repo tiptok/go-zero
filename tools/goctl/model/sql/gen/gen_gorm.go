@@ -394,15 +394,10 @@ type {{.upperStartCamelObject}}Repository interface {
     UpdateWithVersion(ctx context.Context, conn transaction.Conn, dm *{{.upperStartCamelObject}}) (*{{.upperStartCamelObject}}, error)
 	Delete(ctx context.Context, conn transaction.Conn, dm *{{.upperStartCamelObject}}) (*{{.upperStartCamelObject}}, error)
 	FindOne(ctx context.Context, conn transaction.Conn, id int64) (*{{.upperStartCamelObject}}, error)
+	FindOneUnscoped(ctx context.Context, conn transaction.Conn, id int64) (*{{.upperStartCamelObject}}, error)
 	Find(ctx context.Context, conn transaction.Conn, queryOptions map[string]interface{}) (int64, []*{{.upperStartCamelObject}}, error)
 }
 
-func (m *{{.upperStartCamelObject}}) Identify() interface{} {
-	if m.Id == 0 {
-		return nil
-	}
-	return m.Id
-}
 `
 	fields := table.Fields
 	fieldsString, err := genFieldsGorm(table, fields)
@@ -415,7 +410,7 @@ func (m *{{.upperStartCamelObject}}) Identify() interface{} {
 	}
 	return &codeFile{
 		params:      params,
-		fileName:    fmt.Sprintf("interanl/pkg/domain/%v.go", table.Name.ToSnake()),
+		fileName:    fmt.Sprintf("internal/pkg/domain/%v.go", table.Name.ToSnake()),
 		ignoreExist: true,
 		template:    tmp,
 	}
@@ -484,7 +479,7 @@ func (m *{{.upperStartCamelObject}}) CachePrimaryKeyFunc() string {
 	}
 	return &codeFile{
 		params:      params,
-		fileName:    fmt.Sprintf("interanl/pkg/db/models/%v.go", table.Name.ToSnake()),
+		fileName:    fmt.Sprintf("internal/pkg/db/models/%v.go", table.Name.ToSnake()),
 		ignoreExist: true,
 		template:    tmp,
 	}
@@ -569,7 +564,7 @@ func (repository *{{.upperStartCamelObject}}Repository) UpdateWithVersion(ctx co
 func (repository *{{.upperStartCamelObject}}Repository) Delete(ctx context.Context, conn transaction.Conn, dm *domain.{{.upperStartCamelObject}}) (*domain.{{.upperStartCamelObject}}, error) {
 	var (
 		tx        = conn.DB()
-		m = &models.{{.upperStartCamelObject}}{Id: dm.Identify().(int64)}
+		m = &models.{{.upperStartCamelObject}}{Id: dm.Id}
 	)
 	queryFunc := func() (interface{}, error) {
 		tx = tx.Where("id = ?", m.Id).Delete(m)
@@ -589,6 +584,27 @@ func (repository *{{.upperStartCamelObject}}Repository) FindOne(ctx context.Cont
 	)
 	queryFunc := func() (interface{}, error) {
 		tx = tx.Model(m).Where("id = ?", id).First(m)
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return m, tx.Error
+	}
+	cacheModel := new(models.{{.upperStartCamelObject}})
+	cacheModel.Id = id
+	if err = repository.QueryCache(cacheModel.CacheKeyFunc, m, queryFunc); err != nil {
+		return nil, err
+	}
+	return repository.ModelToDomainModel(m)
+}
+
+func (repository *{{.upperStartCamelObject}}Repository) FindOneUnscoped(ctx context.Context, conn transaction.Conn, id int64) (*domain.{{.upperStartCamelObject}}, error) {
+	var (
+		err error
+		tx  = conn.DB()
+		m   = new(models.{{.upperStartCamelObject}})
+	)
+	queryFunc := func() (interface{}, error) {
+		tx = tx.Model(m).Unscoped().Where("id = ?", id).First(m)
 		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrNotFound
 		}
@@ -659,7 +675,7 @@ func New{{.upperStartCamelObject}}Repository(cache *cache.CachedRepository) doma
 	}
 	return &codeFile{
 		params:      params,
-		fileName:    fmt.Sprintf("interanl/pkg/db/repository/%v_repository.go", table.Name.ToSnake()),
+		fileName:    fmt.Sprintf("internal/pkg/db/repository/%v_repository.go", table.Name.ToSnake()),
 		ignoreExist: true,
 		template:    tmp,
 	}
@@ -804,7 +820,7 @@ func PaginationAndCount(ctx context.Context, tx *gorm.DB, params map[string]inte
 	params := map[string]interface{}{}
 	return &codeFile{
 		params:      params,
-		fileName:    fmt.Sprintf("interanl/pkg/db/transaction/%v.go", "transaction"),
+		fileName:    fmt.Sprintf("internal/pkg/db/transaction/%v.go", "transaction"),
 		ignoreExist: true,
 		template:    tmp,
 	}
@@ -834,7 +850,7 @@ func Migrate(db *gorm.DB) {
 	}
 	return &codeFile{
 		params:      params,
-		fileName:    fmt.Sprintf("interanl/pkg/db/%v.go", "migrate"),
+		fileName:    fmt.Sprintf("internal/pkg/db/%v.go", "migrate"),
 		ignoreExist: true,
 		template:    tmp,
 	}
@@ -859,7 +875,7 @@ var ProjectName = "project"
 	params := map[string]interface{}{}
 	return &codeFile{
 		params:      params,
-		fileName:    fmt.Sprintf("interanl/pkg/domain/%v.go", "vars"),
+		fileName:    fmt.Sprintf("internal/pkg/domain/%v.go", "vars"),
 		ignoreExist: true,
 		template:    tmp,
 	}
@@ -900,11 +916,35 @@ func (options QueryOptions) WithOffsetLimit(page, size int) QueryOptions {
 }
 
 func (options QueryOptions) WithKV(key string, value interface{}) QueryOptions {
-	if reflect.ValueOf(value).IsZero() {
+	if isEmptyOrZeroValue(value) {
 		return options
 	}
 	options[key] = value
 	return options
+}
+
+func isEmptyOrZeroValue(i interface{}) bool {
+	if i == nil {
+		return true // 如果接口为空，返回true
+	}
+	// 使用反射判断接口的值是否为零值
+	v := reflect.ValueOf(i)
+	switch v.Kind() {
+	case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() == 0
+	case reflect.Bool:
+		return !v.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return v.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return v.Float() == 0
+	case reflect.Interface, reflect.Ptr:
+		return v.IsNil()
+	default:
+		return false // 其他类型默认不为空
+	}
 }
 
 func (options QueryOptions) MustWithKV(key string, value interface{}) QueryOptions {
@@ -934,6 +974,10 @@ func (options QueryOptions) WithFindOnly() QueryOptions {
 }
 
 func LazyLoad[K comparable, T any](source map[K]T, ctx context.Context, conn transaction.Conn, k K, load func(context.Context, transaction.Conn, K) (T, error)) (T, error) {
+	if isEmptyOrZeroValue(k) {
+		var t T
+		return t, fmt.Errorf("empty key ‘%v’", k)
+	}
 	if v, ok := source[k]; ok {
 		return v, nil
 	}
@@ -957,7 +1001,7 @@ func Values[T any, V any](list []T, each func(item T) V) []V {
 	params := map[string]interface{}{}
 	return &codeFile{
 		params:      params,
-		fileName:    fmt.Sprintf("interanl/pkg/domain/%v.go", "repository"),
+		fileName:    fmt.Sprintf("internal/pkg/domain/%v.go", "repository"),
 		ignoreExist: true,
 		template:    tmp,
 	}
@@ -1026,7 +1070,7 @@ service {{.upperStartCamelObject}}Service {
 	}
 	return &codeFile{
 		params:       params,
-		fileName:     fmt.Sprintf("doc/dsl/rpc/%v.proto", table.Name.ToSnake()),
+		fileName:     fmt.Sprintf("generate/dsl/rpc/%v.proto", table.Name.ToSnake()),
 		ignoreExist:  true,
 		template:     tmp,
 		disableGoFmt: true,
@@ -1072,27 +1116,27 @@ type (
     {{.upperStartCamelObject}}GetRequest {
 		Id int64 {{.dot}}path:"id"{{.dot}}
 	}
-    {{.upperStartCamelObject}}GetResponse struct{
+    {{.upperStartCamelObject}}GetResponse {
 		{{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerFirstCamelObject}}"{{.dot}}
     }
 
-	{{.upperStartCamelObject}}SaveRequest struct{
+	{{.upperStartCamelObject}}SaveRequest {
 		{{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerFirstCamelObject}}"{{.dot}}
     }
-    {{.upperStartCamelObject}}SaveResponse struct{}
+    {{.upperStartCamelObject}}SaveResponse {}
 
-	{{.upperStartCamelObject}}DeleteRequest struct{
+	{{.upperStartCamelObject}}DeleteRequest {
         Id int64 {{.dot}}path:"id"{{.dot}}
     }
-    {{.upperStartCamelObject}}DeleteResponse struct{}
+    {{.upperStartCamelObject}}DeleteResponse {}
 
-	{{.upperStartCamelObject}}UpdateRequest struct{
+	{{.upperStartCamelObject}}UpdateRequest {
 		Id int64 {{.dot}}path:"id"{{.dot}}
         {{.upperStartCamelObject}} {{.upperStartCamelObject}}Item {{.dot}}json:"{{.lowerFirstCamelObject}}"{{.dot}}
     }
-    {{.upperStartCamelObject}}UpdateResponse struct{}
+    {{.upperStartCamelObject}}UpdateResponse {}
 
- 	{{.upperStartCamelObject}}SearchRequest struct{
+ 	{{.upperStartCamelObject}}SearchRequest {
          Page int  {{.dot}}json:"page"{{.dot}}
          Size int  {{.dot}}json:"size"{{.dot}}
     }
@@ -1100,7 +1144,7 @@ type (
         List []{{.upperStartCamelObject}}Item  {{.dot}}json:"list"{{.dot}}
         Total int64 {{.dot}}json:"total"{{.dot}}
     }
-	{{.upperStartCamelObject}}Item struct{
+	{{.upperStartCamelObject}}Item {
 	
 	}
 )
@@ -1220,7 +1264,7 @@ type (
 	}
 	return &codeFile{
 		params:       params,
-		fileName:     fmt.Sprintf("doc/dsl/api/%v.api", table.Name.ToSnake()),
+		fileName:     fmt.Sprintf("generate/dsl/api/%v.api", table.Name.ToSnake()),
 		ignoreExist:  true,
 		template:     tmp,
 		disableGoFmt: true,
